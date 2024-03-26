@@ -1,0 +1,80 @@
+{
+  "version": "0.0.1",
+  "license": "MIT",
+  "main": "dist/index.js",
+  "typings": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "src"
+  ],
+  "engines": {
+    "node": ">=10"
+  },
+  "scripts": {
+    "start": "tsdx watch",
+    "build": "tsdx build",
+    "test": "tsdx test",
+    "lint": "tsdx lint",
+    "prepare": "tsdx build",
+    "size": "size-limit",
+    "analyze": "size-limit --why"
+  },
+  "husky": {
+    "hooks": {
+      "pre-commit": "tsdx lint"
+    }
+  },
+  "prettier": {
+    "printWidth": 80,
+    "semi": true,
+    "singleQuote": true,
+    "trailingComma": "es5"
+  },
+  "name": "pdfile",
+  "module": "dist/pdfile.esm.js",
+  "description": "PDFile is a JavaScript/Node.js PDF generator utilizing Handlebars HTML design and Puppeteer, capable of producing single or multiple-page PDFs.",
+  "author": "Afsarul Islam Meraj <afsarulislammeraj4@gmail.com> (https://github.com/aim3r4j)",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aim3r4j/pdfile.git"
+  },
+  "keywords": [
+    "pdf-generator",
+    "pdf",
+    "pdf-view",
+    "multi-page-pdf",
+    "dynamic-pdf"
+  ],
+  "bugs": {
+    "url": "https://github.com/aim3r4j/pdfile/issues"
+  },
+  "homepage": "https://github.com/aim3r4j/pdfile#readme",
+  "size-limit": [
+    {
+      "path": "dist/pdfile.cjs.production.min.js",
+      "limit": "10 KB",
+      "platform": "node"
+    },
+    {
+      "path": "dist/pdfile.esm.js",
+      "limit": "10 KB",
+      "platform": "node"
+    }
+  ],
+  "devDependencies": {
+    "@size-limit/preset-small-lib": "^8.1.0",
+    "@types/jest": "^29.5.12",
+    "husky": "^8.0.2",
+    "jest": "^24.9.0",
+    "size-limit": "^8.1.0",
+    "tsdx": "^0.13.3",
+    "tslib": "^2.4.1",
+    "typescript": "^3.9.10"
+  },
+  "dependencies": {
+    "fs": "^0.0.1-security",
+    "handlebars": "^4.7.8",
+    "pdf-lib": "^1.17.1",
+    "puppeteer": "^18.1.0"
+  }
+}

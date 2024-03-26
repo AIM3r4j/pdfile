@@ -1,0 +1,54 @@
+{
+  "invoiceNumber": 12345,
+  "invoiceDate": "20 May, 2024",
+  "client": {
+    "name": "Roger Y. Will",
+    "company": "XYZ Company",
+    "email": "info@xyzcompany.com",
+    "address": "123 Main Street"
+  },
+  "company": {
+    "name": "William Peter",
+    "company": "ABC Company",
+    "email": "info@abccompany.com",
+    "address": "456 Main Street"
+  },
+  "items": [
+    {
+      "description": "Brand Designing",
+      "price": "$350.00",
+      "quantity": 2,
+      "total": "$700.00"
+    },
+    {
+      "description": "Website Development",
+      "price": "$250.00",
+      "quantity": 1,
+      "total": "$250.00"
+    },
+    {
+      "description": "Blog Writing",
+      "price": "$100.00",
+      "quantity": 4,
+      "total": "$400.00"
+    },
+    {
+      "description": "Logo Designing",
+      "price": "$350.00",
+      "quantity": 2,
+      "total": "$700.00"
+    }
+  ],
+  "contact": {
+    "address": "30 E Lake St, Chicago, USA",
+    "phone": "(510) 710-3464",
+    "email": "info@worldcourse.com"
+  },
+  "payment": {
+    "accountNo": "102 3345 56938",
+    "accountName": "William Peter",
+    "branchName": "XYZ"
+  },
+  "notice": "A finance charge of 1.5% will be made on unpaid balances after 30 days.",
+  "copyrightYear": 2024
+}
