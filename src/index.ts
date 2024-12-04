@@ -1,14 +1,14 @@
-import { launch, PDFOptions, PuppeteerLaunchOptions } from 'puppeteer';
+import { launch, PDFOptions, LaunchOptions } from 'puppeteer';
 import hbs from 'handlebars';
-import fs from 'fs/promises';
 import { PDFDocument } from 'pdf-lib';
+import { createReadStream, createWriteStream } from 'fs';
 
 /**
  * Generate a PDF from a Handlebars template using Puppeteer.
  * @param {string} templateFilePath - The path to the Handlebars template file.
  * @param {string} pdfFilePath - The path where the generated PDF file will be saved.
  * @param {object[]} dataPerPage - An array containing data objects for each page of the PDF.
- * @param {PuppeteerLaunchOptions} [puppeteerOptions] - Optional Puppeteer launch options.
+ * @param {LaunchOptions} [puppeteerOptions] - Optional Puppeteer launch options.
  * @param {PDFOptions} [pdfOptions] - Optional PDF generation options.
  * @returns {Promise<string>} A Promise that resolves with the path to the generated PDF file.
  * @throws {Error} Throws an error if no data is passed to inject into the PDF.
@@ -17,7 +17,7 @@ export const generatePdf = async (
   templateFilePath: string,
   pdfFilePath: string,
   dataPerPage = [{}],
-  puppeteerOptions?: PuppeteerLaunchOptions,
+  puppeteerOptions?: LaunchOptions,
   pdfOptions?: PDFOptions
 ) => {
   try {
@@ -27,7 +27,7 @@ export const generatePdf = async (
 
     const browser = await launch(puppeteerOptions);
 
-    hbs.registerHelper('ifCond', function(
+    hbs.registerHelper('ifCond', function (
       v1: any,
       operator: any,
       v2: any,
@@ -94,7 +94,14 @@ export const generatePdf = async (
       },
     });
 
-    const html = await fs.readFile(templateFilePath, 'utf8');
+    const html = await new Promise<string>((resolve, reject) => {
+      const stream = createReadStream(templateFilePath, { encoding: 'utf8' });
+      let data = '';
+      stream.on('data', chunk => (data += chunk));
+      stream.on('end', () => resolve(data));
+      stream.on('error', err => reject(err));
+    });
+
     const pdfBuffers = [];
 
     // Removing path property from PDFOptions to generate buffer instead of file
@@ -130,7 +137,13 @@ export const generatePdf = async (
 
     const buf = await mergedPdf.save(); // Uint8Array
 
-    await fs.writeFile(pdfFilePath, buf);
+    await new Promise<void>((resolve, reject) => {
+      const stream = createWriteStream(pdfFilePath);
+      stream.write(buf);
+      stream.end();
+      stream.on('finish', () => resolve());
+      stream.on('error', err => reject(err));
+    });
 
     await browser.close();
 
