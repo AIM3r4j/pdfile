@@ -19,13 +19,17 @@ export const generatePdf = async (
   dataPerPage = [{}],
   puppeteerOptions?: LaunchOptions,
   pdfOptions?: PDFOptions
-) => {
+): Promise<any> => {
   try {
     // Throws error if no data got passed
     if (JSON.stringify(dataPerPage) === '[]')
       throw new Error('No data was passed to inject into PDF');
 
-    const browser = await launch(puppeteerOptions);
+    const browser = await launch({
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+      ...puppeteerOptions
+    });
 
     hbs.registerHelper('ifCond', function (
       v1: any,
@@ -147,12 +151,12 @@ export const generatePdf = async (
 
     await browser.close();
 
-    console.log('PDF successfully created');
-    console.log(pdfFilePath);
+    console.log('PDF successfully created at', pdfFilePath);
 
     return pdfFilePath;
-  } catch (e) {
-    console.log(e);
-    throw new Error(`PDF generation failed: ${e.message}`);
+  } catch (error) {
+    console.log(error);
+    if (error instanceof Error)
+      throw new Error(`PDF generation failed: ${error.message}`);
   }
 };
