@@ -8,16 +8,14 @@
     "src"
   ],
   "engines": {
-    "node": ">=10"
+    "node": ">=18"
   },
   "scripts": {
     "start": "tsdx watch",
     "build": "tsdx build",
     "test": "tsdx test",
     "lint": "tsdx lint",
-    "prepare": "tsdx build",
-    "size": "size-limit",
-    "analyze": "size-limit --why"
+    "prepare": "tsdx build"
   },
   "husky": {
     "hooks": {
@@ -32,7 +30,7 @@
   },
   "name": "pdfile",
   "module": "dist/pdfile.esm.js",
-  "description": "PDFile is a JavaScript/Node.js PDF generator utilizing Handlebars HTML design and Puppeteer, capable of producing single or multiple-page PDFs.",
+  "description": "PDFile is a Node.js library for generating high-quality, dynamic PDFs using Handlebars templates and Puppeteer. It supports multi-page PDFs and offers full customization. Perfect for web developers, it enables easy creation of multi-page PDFs by simply designing HTML templates for output.",
   "author": "Afsarul Islam Meraj <afsarulislammeraj4@gmail.com> (https://github.com/aim3r4j)",
   "repository": {
     "type": "git",
@@ -43,38 +41,26 @@
     "pdf",
     "pdf-view",
     "multi-page-pdf",
-    "dynamic-pdf"
+    "dynamic-pdf",
+    "puppeteer-pdf",
+    "easy-pdf",
+    "handlebars"
   ],
   "bugs": {
     "url": "https://github.com/aim3r4j/pdfile/issues"
   },
   "homepage": "https://github.com/aim3r4j/pdfile#readme",
-  "size-limit": [
-    {
-      "path": "dist/pdfile.cjs.production.min.js",
-      "limit": "10 KB",
-      "platform": "node"
-    },
-    {
-      "path": "dist/pdfile.esm.js",
-      "limit": "10 KB",
-      "platform": "node"
-    }
-  ],
   "devDependencies": {
-    "@size-limit/preset-small-lib": "^8.1.0",
     "@types/jest": "^29.5.12",
     "husky": "^8.0.2",
     "jest": "^24.9.0",
-    "size-limit": "^8.1.0",
-    "tsdx": "^0.13.3",
+    "tsdx": "^0.14.1",
     "tslib": "^2.4.1",
     "typescript": "^3.9.10"
   },
   "dependencies": {
     "fs": "^0.0.1-security",
     "handlebars": "^4.7.8",
-    "pdf-lib": "^1.17.1",
     "puppeteer": "^18.1.0"
   }
 }

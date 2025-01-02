@@ -1,17 +1,11 @@
 # PDFile
 
-PDFile is a JavaScript/Node.js PDF generator utilizing Handlebars HTML design and Puppeteer, capable of producing single or multiple-page PDFs.
+PDFile is a Node.js library for generating high-quality, dynamic PDFs using Handlebars templates and Puppeteer. It supports multi-page PDFs and offers full customization. Perfect for web developers, it enables easy creation of multi-page PDFs by simply designing HTML templates for output.
 
 ## Installation
 
 ```sh
 npm i pdfile
-```
-
-(Optional) Might want to install the chromium browser beforehand for puppeteer to properly work
-
-```sh
-npx puppeteer browsers install chrome
 ```
 
 ## Usage
@@ -27,62 +21,34 @@ import { generatePdf } from 'pdfile';
 Call the function to generate the PDF
 
 ```javascript
-const generatedPdfFilePath = await generatePdf(
+const generatedPdfFilePath = await generatePdf({
   [templateFilePath],
-  [pdfFilePath],
   [dataPerPage],
+  [pdfFilePath],
+  [useStream],
+  [helpersFilePath],
   [puppeteerOptions],
-  [pdfOptions]
-);
+  [pdfOptions],
+});
 ```
 
-Parameters:
 
-- `templateFilePath` <[String](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Data_structures#String_type 'String')> It's required. Handlebars HTML file path.
-- `pdfFilePath` <[String](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Data_structures#String_type 'String')> It's required. The path where the generated PDF file will be saved.
-- `dataPerPage` <[Array Of Objects](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array 'Array Of Objects')> It's required. Suggested Value:
+| Parameter      | Type           | Description                  |Required                  | Default                  |
+| --------------- | ---------------------- | ----------------------------- | ---------------------- | ----------------------------- |
+| `templateFilePath`  | `string`     | Path to the Handlebars template file. | `Yes`     | `N/A` |
+| `dataPerPage`  | `Array` | Array of objects containing data for each page of the PDF | `Yes`     | `N/A` |
+| `pdfFilePath`   | `string`    | The path where the generated PDF file will be saved. Required, if **useStream** is not passed or set to false. | `No`     | `N/A` |
+| `useStream`    | `boolean`     | Returns a readable stream of the PDF instead of saving it to disk if set to true | `No`     | `false` |
+| `helpersFilePath`   | `string`    | Path to a file containing custom Handlebars helpers. | `No`     | `N/A` |
+| `puppeteerOptions`    | `object`     | Puppeteer launch options (e.g., headless mode, executable path). <[PuppeteerLaunchOptions](https://pptr.dev/api/puppeteer.puppeteerlaunchoptions 'PuppeteerLaunchOptions')> | `No`     |  <pre lang="json"> { "headless": true, "args": ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"] } </pre>    |
+| `pdfOptions`   | `object`    | Options for PDF generation (e.g., format, margins). <[PDFOptions](https://pptr.dev/api/puppeteer.pdfoptions 'PDFOptions')> | `No`     | <pre lang="json"> { "format": "A4", "margin": { "left": "10mm", "top": "10mm", "right": "10mm", "bottom": "10mm" }, "printBackground": true } </pre> |
 
-```json
-[
-  {
-    "invoiceNumber": 12345,
-    "invoiceDate": "20 May, 2024",
-    "currentPage": 1,
-    "totalPages": 2
-  },
-  {
-    "invoiceNumber": 678910,
-    "invoiceDate": "21 May, 2024",
-    "currentPage": 2,
-    "totalPages": 2
-  }
-]
-```
-
-- `puppeteerOptions` <[PuppeteerLaunchOptions](https://pptr.dev/api/puppeteer.puppeteerlaunchoptions 'PuppeteerLaunchOptions')> It's optional.
-- `pdfOptions` <[PDFOptions](https://pptr.dev/api/puppeteer.pdfoptions 'PDFOptions')> It's optional.
-  Default value:
-
-```json
-{
-  "format": "A4",
-  "margin": {
-    "left": "10mm",
-    "top": "10mm",
-    "right": "10mm",
-    "bottom": "10mm"
-  },
-  "printBackground": true
-}
-```
-
-For more values, [check this link out](https://pptr.dev/api/puppeteer.pdfoptions)
 
 ### Working Example
 
-You can copy the 'example' folder to quickly use the library
+To quickly get started, you can use the 'example' folder and check out the working code given in the file 'file.service.ts'. Ensure all dependencies are installed beforehand.
 
-Result: pdf-invoice.pdf
+PDF generated in this example:
 
 ![plot](./images/1.png)
 
@@ -90,7 +56,7 @@ Result: pdf-invoice.pdf
 
 ---
 
-| JavaScript      | HTMLBars OP1           | HTMLBars OP2                  |
+| JavaScript      | Handlebars Helper Syntax (Standard)           | Handlebars Helper Syntax (Custom)                  |
 | --------------- | ---------------------- | ----------------------------- |
 | `if (a === b)`  | `{{#if (eq a b)}}`     | `{{#ifCond var1 '===' var2}}` |
 | `if (a !== b)`  | `{{#if (not-eq a b)}}` | `{{#ifCond var1 '!==' var2}}` |

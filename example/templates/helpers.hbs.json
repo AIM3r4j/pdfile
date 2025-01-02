@@ -1,0 +1,10 @@
+{
+  "eq": "function(v1, v2) { return v1 === v2; }",
+  "ne": "function(v1, v2) { return v1 !== v2; }",
+  "lt": "function(v1, v2) { return v1 < v2; }",
+  "gt": "function(v1, v2) { return v1 > v2; }",
+  "lte": "function(v1, v2) { return v1 <= v2; }",
+  "gte": "function(v1, v2) { return v1 >= v2; }",
+  "and": "function(...args) { return args.every(Boolean); }",
+  "or": "function(...args) { return args.slice(0, -1).some(Boolean); }"
+}
