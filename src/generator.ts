@@ -1,135 +1,211 @@
-import { PDFOptions, LaunchOptions } from 'puppeteer';
+import { PDFOptions, PuppeteerLaunchOptions, Browser, Page } from 'puppeteer';
 import hbs from 'handlebars';
 import { createReadStream, createWriteStream } from 'fs';
-import { createBrowser } from './browser';
-import { registerHandlebarsHelpers } from './handlebars-helpers';
-import { Readable } from 'stream';
+import { pipeline } from 'stream';
+import { promisify } from 'util';
+import { createBrowser as createSharedBrowser, launchBrowser } from './browser';
+import {
+  HandlebarsHelpers,
+  parseHelpersJson,
+  registerHandlebarsHelpers,
+} from './handlebars-helpers';
+
+const pipelineAsync = promisify(pipeline);
+
+const DEFAULT_PDF_OPTIONS: PDFOptions = {
+  format: 'A4',
+  margin: { left: '10mm', top: '10mm', right: '10mm', bottom: '10mm' },
+  printBackground: true,
+};
 
 export interface GeneratePdfOptions {
-    templateFilePath: string;
-    dataPerPage: Array<object>;
-    pdfFilePath?: string;
-    useStream?: boolean;
-    helpersFilePath?: string;
-    puppeteerOptions?: LaunchOptions;
-    pdfOptions?: PDFOptions;
+  /** Path to the Handlebars template file. */
+  templateFilePath: string;
+  /** One object per page. Each entry renders the template once; results are concatenated. */
+  dataPerPage: Array<object>;
+  /** Where to write the PDF. Required unless `useStream` is true. */
+  pdfFilePath?: string;
+  /** Return a Readable stream of the PDF instead of writing to disk. */
+  useStream?: boolean;
+  /** Plain object of `{ name: fn }` Handlebars helpers. Preferred over `helpersFilePath`. */
+  helpers?: HandlebarsHelpers;
+  /**
+   * Path to a JSON file of helpers whose values are stringified function bodies.
+   * @deprecated Use `helpers` instead — this path runs `new Function` on file contents.
+   */
+  helpersFilePath?: string;
+  /** Puppeteer launch options (only used by the singleton `generatePdf` on first call). */
+  puppeteerOptions?: PuppeteerLaunchOptions;
+  /** Puppeteer PDF options. Merged on top of A4 / 10mm margin defaults. */
+  pdfOptions?: PDFOptions;
 }
+
+const readFileAsString = async (path: string): Promise<string> => {
+  const stream = createReadStream(path, { encoding: 'utf8' });
+  let data = '';
+  for await (const chunk of stream) data += chunk;
+  return data;
+};
+
+const renderTemplate = async (
+  templateFilePath: string,
+  dataPerPage: Array<object>
+): Promise<string> => {
+  const source = await readFileAsString(templateFilePath);
+  const template = hbs.compile(source);
+  return dataPerPage.map(d => template(d)).join('');
+};
+
+const resolveHelpers = async (
+  helpers?: HandlebarsHelpers,
+  helpersFilePath?: string
+): Promise<HandlebarsHelpers | undefined> => {
+  if (helpers) return helpers;
+  if (helpersFilePath) {
+    const raw = await readFileAsString(helpersFilePath);
+    return parseHelpersJson(raw);
+  }
+  return undefined;
+};
+
+const validateOptions = ({
+  pdfFilePath,
+  useStream,
+  dataPerPage,
+}: GeneratePdfOptions): void => {
+  if (!pdfFilePath && !useStream) {
+    throw new Error(
+      '"pdfFilePath" must be specified unless "useStream" is set to true.'
+    );
+  }
+  if (pdfFilePath && useStream) {
+    throw new Error(
+      'Conflicting parameters: "pdfFilePath" and "useStream" cannot both be used simultaneously.'
+    );
+  }
+  if (!Array.isArray(dataPerPage) || dataPerPage.length === 0) {
+    throw new Error('No data was passed to inject into PDF');
+  }
+};
+
+const renderPageOnBrowser = async (
+  browser: Browser,
+  html: string
+): Promise<Page> => {
+  const page = await browser.newPage();
+  await page.setContent(html, { waitUntil: 'networkidle0' });
+  await page.evaluateHandle('document.fonts.ready');
+  return page;
+};
+
 /**
- * Generate a PDF from a Handlebars template using Puppeteer.
- * @param {string} templateFilePath - The path to the Handlebars template file.
- * @param {object[]} dataPerPage - An array containing data objects for each page of the PDF.
- * @param {string} pdfFilePath - [Optional] The path where the generated PDF file will be saved. Required, if useStream is not passed or set to false.
- * @param {boolean} useStream - [Optional] Setting this to true will return a readable stream of the pdf instead of writing to the disk on the path "pdfFilePath".
- * @param {string} [helpersFilePath] - [Optional] The path to a Handlebars helpers file containing custom Handlebars helpers.
- * @param {LaunchOptions} [puppeteerOptions] - [Optional] Puppeteer launch options.
- * @param {PDFOptions} [pdfOptions] - [Optional] PDF generation options.
- * @returns {Promise<string>} A Promise that resolves with the path to the generated PDF file or a readable stream of the pdf if "useStream is set to true".
- * @throws {Error} Throws an error if no data is passed to inject into the PDF.
+ * Core PDF generation that takes a pre-launched browser. Lets callers manage
+ * the browser lifecycle directly via `PdfGenerator`.
  */
-export const generatePdf = async ({
-    templateFilePath,
-    dataPerPage,
-    pdfFilePath = undefined,
-    useStream = false,
-    helpersFilePath,
-    puppeteerOptions,
-    pdfOptions,
-}: GeneratePdfOptions): Promise<string | NodeJS.ReadableStream> => {
-    let page = undefined;
-    try {
-        // Throws error if both pdfFilePath and useStream values are not passed
-        // or useStream is passed as false but pdfFilePath was not provided
-        if (!pdfFilePath && !useStream)
-            throw new Error(
-                '"pdfFilePath" must be specified unless "useStream" is set to true.'
-            );
+const generateOnBrowser = async (
+  browser: Browser,
+  options: GeneratePdfOptions
+): Promise<string | NodeJS.ReadableStream> => {
+  validateOptions(options);
 
-        if (pdfFilePath && useStream)
-            throw new Error(
-                'Conflicting parameters: "pdfFilePath" and "useStream" cannot both be used simultaneously.'
-            );
+  const userHelpers = await resolveHelpers(
+    options.helpers,
+    options.helpersFilePath
+  );
+  registerHandlebarsHelpers(userHelpers);
 
-        // Throws error if no data got passed
-        if (JSON.stringify(dataPerPage) === '[]')
-            throw new Error('No data was passed to inject into PDF');
+  const html = await renderTemplate(
+    options.templateFilePath,
+    options.dataPerPage
+  );
 
-        const browser = await createBrowser(puppeteerOptions);
+  const pdfConfig: PDFOptions = {
+    ...DEFAULT_PDF_OPTIONS,
+    ...options.pdfOptions,
+  };
 
-        if (helpersFilePath) {
-            const helpersStream = createReadStream(helpersFilePath, {
-                encoding: 'utf8',
-            });
-            let helperData = '';
-            for await (const chunk of helpersStream) {
-                helperData += chunk;
-            }
-            helpersStream.close();
-            registerHandlebarsHelpers(dataPerPage, helperData);
-        } else {
-            registerHandlebarsHelpers(dataPerPage);
-        }
+  let page: Page | undefined;
+  try {
+    page = await renderPageOnBrowser(browser, html);
 
-        const htmlStream = createReadStream(templateFilePath, { encoding: 'utf8' });
-        let htmlData = '';
-        for await (const chunk of htmlStream) {
-            htmlData += chunk;
-        }
-        htmlStream.close();
-
-        const template = hbs.compile(htmlData);
-
-        let pdfConfig: PDFOptions = {
-            format: 'A4',
-            margin: {
-                left: '10mm',
-                top: '10mm',
-                right: '10mm',
-                bottom: '10mm',
-            },
-            printBackground: true,
-            ...pdfOptions,
-        };
-
-        page = await browser.newPage();
-        const content = dataPerPage
-            .map(singlePageData => template(singlePageData))
-            .join('');
-        await page.setContent(content, { waitUntil: 'networkidle0' });
-        await page.evaluateHandle('document.fonts.ready');
-        if (useStream) {
-            const pdfBuffer = await page.pdf(pdfConfig);
-            return Readable.from(pdfBuffer);
-        } else {
-            if (!pdfFilePath) {
-                throw new Error('PDF file path must be provided.');
-            }
-            const pdfBuffer = await page.pdf({
-                format: 'A4',
-                margin: {
-                    left: '10mm',
-                    top: '10mm',
-                    right: '10mm',
-                    bottom: '10mm',
-                },
-                printBackground: true,
-                ...pdfOptions,
-            });
-            await new Promise<void>((resolve, reject) => {
-                const stream = createWriteStream(pdfFilePath);
-                stream.write(pdfBuffer);
-                stream.end();
-                stream.on('finish', () => resolve());
-                stream.on('error', err => reject(err));
-            });
-            return pdfFilePath;
-        }
-    } catch (error) {
-        console.log(error);
-        if (error instanceof Error)
-            throw new Error(`PDF generation failed: ${error.message}`);
-
-        throw new Error('An unknown error occurred during PDF generation.');
-    } finally {
-        if (page) await page.close();
+    if (options.useStream) {
+      const stream = await page.createPDFStream(pdfConfig);
+      const pageRef = page;
+      page = undefined; // ownership transferred to the stream consumer
+      const closePage = () => {
+        pageRef.close().catch(() => undefined);
+      };
+      stream.once('end', closePage);
+      stream.once('close', closePage);
+      stream.once('error', closePage);
+      return stream;
     }
+
+    if (!options.pdfFilePath) {
+      throw new Error('PDF file path must be provided.');
+    }
+
+    const pdfStream = await page.createPDFStream(pdfConfig);
+    await pipelineAsync(pdfStream, createWriteStream(options.pdfFilePath));
+    return options.pdfFilePath;
+  } finally {
+    if (page) await page.close();
+  }
+};
+
+/**
+ * A caller-owned PDF generator. Holds its own Puppeteer Browser instance —
+ * isolated from the module singleton used by `generatePdf` / `closeBrowser`.
+ *
+ * @example
+ *   const gen = new PdfGenerator();
+ *   try {
+ *     await gen.generate({ templateFilePath, dataPerPage, pdfFilePath });
+ *   } finally {
+ *     await gen.close();
+ *   }
+ */
+export class PdfGenerator {
+  private browserPromise: Promise<Browser> | null = null;
+  private readonly launchOptions: PuppeteerLaunchOptions | undefined;
+
+  constructor(launchOptions?: PuppeteerLaunchOptions) {
+    this.launchOptions = launchOptions;
+  }
+
+  /** Force the browser to launch now instead of on first `generate()`. */
+  async warmup(): Promise<Browser> {
+    if (!this.browserPromise) {
+      this.browserPromise = launchBrowser(this.launchOptions);
+    }
+    return this.browserPromise;
+  }
+
+  async generate(
+    options: GeneratePdfOptions
+  ): Promise<string | NodeJS.ReadableStream> {
+    const browser = await this.warmup();
+    return generateOnBrowser(browser, options);
+  }
+
+  async close(): Promise<void> {
+    const promise = this.browserPromise;
+    this.browserPromise = null;
+    if (promise) {
+      const browser = await promise;
+      await browser.close();
+    }
+  }
+}
+
+/**
+ * Generate a PDF using the shared module-level browser singleton.
+ * Call `closeBrowser()` when you're done. For long-running servers or test
+ * suites, prefer the `PdfGenerator` class.
+ */
+export const generatePdf = async (
+  options: GeneratePdfOptions
+): Promise<string | NodeJS.ReadableStream> => {
+  const browser = await createSharedBrowser(options.puppeteerOptions);
+  return generateOnBrowser(browser, options);
 };

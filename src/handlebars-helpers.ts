@@ -1,71 +1,76 @@
 import hbs from 'handlebars';
 
-export const registerHandlebarsHelpers = (data: any, helpers?: any) => {
-  hbs.registerHelper('ifCond', function(
-    v1: any,
-    operator: any,
-    v2: any,
-    options: any
-  ) {
-    switch (operator) {
-      case '==':
-        return v1 == v2 ? options.fn(data) : options.inverse(data);
-      case '===':
-        return v1 === v2 ? options.fn(data) : options.inverse(data);
-      case '!=':
-        return v1 != v2 ? options.fn(data) : options.inverse(data);
-      case '!==':
-        return v1 !== v2 ? options.fn(data) : options.inverse(data);
-      case '<':
-        return v1 < v2 ? options.fn(data) : options.inverse(data);
-      case '<=':
-        return v1 <= v2 ? options.fn(data) : options.inverse(data);
-      case '>':
-        return v1 > v2 ? options.fn(data) : options.inverse(data);
-      case '>=':
-        return v1 >= v2 ? options.fn(data) : options.inverse(data);
-      case '&&':
-        return v1 && v2 ? options.fn(data) : options.inverse(data);
-      case '||':
-        return v1 || v2 ? options.fn(data) : options.inverse(data);
-      default:
-        return options.inverse(options);
-    }
-  });
+export type HandlebarsHelper = (...args: any[]) => any;
+export type HandlebarsHelpers = Record<string, HandlebarsHelper>;
 
-  if (helpers) {
-    const parsedHelpers = JSON.parse(helpers);
-    Object.entries(parsedHelpers).forEach(([name, funcBody]) => {
-      const helperFunction = new Function(`return (${funcBody})`)(); // No eval, safer
-      hbs.registerHelper(name, helperFunction);
-    });
-  } else {
-    // Default helper functions registration
-    hbs.registerHelper({
-      eq: function(v1, v2) {
-        return v1 === v2;
-      },
-      ne: function(v1, v2) {
-        return v1 !== v2;
-      },
-      lt: function(v1, v2) {
-        return v1 < v2;
-      },
-      gt: function(v1, v2) {
-        return v1 > v2;
-      },
-      lte: function(v1, v2) {
-        return v1 <= v2;
-      },
-      gte: function(v1, v2) {
-        return v1 >= v2;
-      },
-      and: function(...args) {
-        return args.every(Boolean);
-      },
-      or: function(...args) {
-        return args.slice(0, -1).some(Boolean);
-      },
-    });
+const builtinHelpers: HandlebarsHelpers = {
+  eq: (v1, v2) => v1 === v2,
+  ne: (v1, v2) => v1 !== v2,
+  lt: (v1, v2) => v1 < v2,
+  gt: (v1, v2) => v1 > v2,
+  lte: (v1, v2) => v1 <= v2,
+  gte: (v1, v2) => v1 >= v2,
+  'not-eq': (v1, v2) => v1 !== v2,
+  and: (...args) => args.slice(0, -1).every(Boolean),
+  or: (...args) => args.slice(0, -1).some(Boolean),
+};
+
+const ifCond: HandlebarsHelper = function(
+  this: any,
+  v1: any,
+  operator: any,
+  v2: any,
+  options: any
+) {
+  switch (operator) {
+    case '==':
+      // eslint-disable-next-line eqeqeq
+      return v1 == v2 ? options.fn(this) : options.inverse(this);
+    case '===':
+      return v1 === v2 ? options.fn(this) : options.inverse(this);
+    case '!=':
+      // eslint-disable-next-line eqeqeq
+      return v1 != v2 ? options.fn(this) : options.inverse(this);
+    case '!==':
+      return v1 !== v2 ? options.fn(this) : options.inverse(this);
+    case '<':
+      return v1 < v2 ? options.fn(this) : options.inverse(this);
+    case '<=':
+      return v1 <= v2 ? options.fn(this) : options.inverse(this);
+    case '>':
+      return v1 > v2 ? options.fn(this) : options.inverse(this);
+    case '>=':
+      return v1 >= v2 ? options.fn(this) : options.inverse(this);
+    case '&&':
+      return v1 && v2 ? options.fn(this) : options.inverse(this);
+    case '||':
+      return v1 || v2 ? options.fn(this) : options.inverse(this);
+    default:
+      return options.inverse(this);
   }
+};
+
+/**
+ * Parse a helpers JSON file whose values are stringified function bodies.
+ * Uses `new Function` — only call on trusted input. Prefer the object-based
+ * `helpers` option instead.
+ *
+ * @deprecated since v1.1 — pass `helpers` as a plain object instead.
+ */
+export const parseHelpersJson = (raw: string): HandlebarsHelpers => {
+  const parsed = JSON.parse(raw) as Record<string, string>;
+  const out: HandlebarsHelpers = {};
+  for (const [name, body] of Object.entries(parsed)) {
+    // eslint-disable-next-line no-new-func
+    out[name] = new Function(`return (${body})`)() as HandlebarsHelper;
+  }
+  return out;
+};
+
+export const registerHandlebarsHelpers = (
+  userHelpers?: HandlebarsHelpers
+): void => {
+  hbs.registerHelper('ifCond', ifCond);
+  hbs.registerHelper(builtinHelpers);
+  if (userHelpers) hbs.registerHelper(userHelpers);
 };

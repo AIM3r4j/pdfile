@@ -1,102 +1,201 @@
-import { closeBrowser, generatePdf } from '../src';
+import {
+  closeBrowser,
+  generatePdf,
+  PdfGenerator,
+  HandlebarsHelpers,
+} from '../src';
 import * as path from 'path';
-import { createWriteStream, existsSync } from 'fs';
+import {
+  createWriteStream,
+  existsSync,
+  promises as fsp,
+  statSync,
+  unlinkSync,
+} from 'fs';
+import { Readable, pipeline } from 'stream';
+import { promisify } from 'util';
 
-import { Readable } from 'stream';
-import { readFile } from 'fs/promises';
+const pipelineAsync = promisify(pipeline);
+const PDF_HEADER = Buffer.from('%PDF-');
 
-describe('PDF generation test', () => {
-  it("should return the generated pdf file's path", async () => {
-    try {
-      const templateFilePath = path.join(
-        process.cwd(),
-        'example/templates',
-        'pdf-invoice.hbs'
-      );
-      const pdfFilePath = path.join(
-        process.cwd(),
-        'example/pdfs',
-        'pdf-invoice.pdf'
-      );
-      const singlePageDataFilePath = path.join(
-        process.cwd(),
-        'example/templates',
-        'pdf-invoice.hbs.json'
-      );
-      const singlePageData = await readFile(singlePageDataFilePath, 'utf8');
-      const dataPerPage = [JSON.parse(singlePageData)];
+const templateFilePath = path.join(
+  process.cwd(),
+  'example/templates',
+  'pdf-invoice.hbs'
+);
+const dataFilePath = path.join(
+  process.cwd(),
+  'example/templates',
+  'pdf-invoice.hbs.json'
+);
+const helpersFilePath = path.join(
+  process.cwd(),
+  'example/templates',
+  'helpers.hbs.json'
+);
+const outDir = path.join(process.cwd(), 'example/pdfs');
+const outPath = (name: string) => path.join(outDir, name);
 
-      const helpersFilePath = path.join(
-        process.cwd(),
-        'example/templates',
-        'helpers.hbs.json'
-      );
+const loadData = async () => {
+  const raw = await fsp.readFile(dataFilePath, 'utf8');
+  return JSON.parse(raw);
+};
 
-      const generatedFilePath = await generatePdf({
-        templateFilePath,
-        pdfFilePath,
-        helpersFilePath,
-        dataPerPage,
-      });
-      console.log(`PDF successfully generated at: ${generatedFilePath}`);
-      expect(existsSync(pdfFilePath)).toEqual(true);
-      expect(typeof generatedFilePath).toEqual('string');
-    } catch (error) {
-      console.error(`Error generating PDF:`, error);
-    } finally {
-      await closeBrowser();
-    }
+const isPdfFile = (filePath: string): boolean => {
+  const stat = statSync(filePath);
+  if (stat.size < 5) return false;
+  // Header check — Puppeteer always writes %PDF- at offset 0.
+  // We can't slice a stream synchronously here, so read it as a buffer.
+  const fd = require('fs').openSync(filePath, 'r');
+  try {
+    const buf = Buffer.alloc(5);
+    require('fs').readSync(fd, buf, 0, 5, 0);
+    return buf.equals(PDF_HEADER);
+  } finally {
+    require('fs').closeSync(fd);
+  }
+};
+
+const cleanup = (file: string) => {
+  if (existsSync(file)) unlinkSync(file);
+};
+
+describe('generatePdf (singleton API)', () => {
+  afterAll(async () => {
+    await closeBrowser();
   });
 
-  it('should return the generated pdf file as a readable stream', async () => {
-    try {
-      const templateFilePath = path.join(
-        process.cwd(),
-        'example/templates',
-        'pdf-invoice.hbs'
-      );
-      const pdfFilePath = path.join(
-        process.cwd(),
-        'example/pdfs',
-        'pdf-invoice.pdf'
-      );
-      const singlePageDataFilePath = path.join(
-        process.cwd(),
-        'example/templates',
-        'pdf-invoice.hbs.json'
-      );
-      const singlePageData = await readFile(singlePageDataFilePath, 'utf8');
-      const dataPerPage = [JSON.parse(singlePageData)];
+  it('writes a valid PDF to disk when pdfFilePath is given', async () => {
+    expect.assertions(3);
+    const pdfFilePath = outPath('singleton-file.pdf');
+    cleanup(pdfFilePath);
 
-      const helpersFilePath = path.join(
-        process.cwd(),
-        'example/templates',
-        'helpers.hbs.json'
-      );
+    const dataPerPage = [await loadData()];
+    const result = await generatePdf({
+      templateFilePath,
+      pdfFilePath,
+      helpersFilePath,
+      dataPerPage,
+    });
 
-      const writeStream = createWriteStream(pdfFilePath);
-      const pdfStream = await generatePdf({
+    expect(result).toBe(pdfFilePath);
+    expect(existsSync(pdfFilePath)).toBe(true);
+    expect(isPdfFile(pdfFilePath)).toBe(true);
+  });
+
+  it('returns a Readable that pipes to a valid PDF when useStream is true', async () => {
+    expect.assertions(3);
+    const pdfFilePath = outPath('singleton-stream.pdf');
+    cleanup(pdfFilePath);
+
+    const dataPerPage = [await loadData()];
+    const stream = await generatePdf({
+      templateFilePath,
+      helpersFilePath,
+      dataPerPage,
+      useStream: true,
+    });
+
+    expect(stream).toBeInstanceOf(Readable);
+    await pipelineAsync(stream as Readable, createWriteStream(pdfFilePath));
+    expect(existsSync(pdfFilePath)).toBe(true);
+    expect(isPdfFile(pdfFilePath)).toBe(true);
+  });
+
+  it('throws when neither pdfFilePath nor useStream is provided', async () => {
+    expect.assertions(1);
+    await expect(
+      generatePdf({
         templateFilePath,
-        helpersFilePath,
-        dataPerPage,
+        dataPerPage: [await loadData()],
+      } as any)
+    ).rejects.toThrow(/pdfFilePath.*useStream/);
+  });
+
+  it('throws when both pdfFilePath and useStream are provided', async () => {
+    expect.assertions(1);
+    await expect(
+      generatePdf({
+        templateFilePath,
+        pdfFilePath: outPath('conflict.pdf'),
         useStream: true,
-      });
-      if (pdfStream instanceof Readable) {
-        pdfStream.pipe(writeStream);
+        dataPerPage: [await loadData()],
+      })
+    ).rejects.toThrow(/cannot both be used/);
+  });
 
-        writeStream.on('finish', () => {
-          console.log(`PDF successfully written at: ${pdfFilePath}`);
-        });
+  it('throws when dataPerPage is empty', async () => {
+    expect.assertions(1);
+    await expect(
+      generatePdf({
+        templateFilePath,
+        pdfFilePath: outPath('empty.pdf'),
+        dataPerPage: [],
+      })
+    ).rejects.toThrow(/No data/);
+  });
+});
 
-        writeStream.on('error', error => {
-          console.error(`Error writing PDF:`, error);
-        });
-      }
-      expect(existsSync(pdfFilePath)).toEqual(true);
-    } catch (error) {
-      console.error(`Error generating PDF:`, error);
-    } finally {
-      await closeBrowser();
-    }
+describe('PdfGenerator (class API)', () => {
+  let gen: PdfGenerator;
+
+  beforeAll(() => {
+    gen = new PdfGenerator();
+  });
+
+  afterAll(async () => {
+    await gen.close();
+  });
+
+  it('generates a multi-page PDF with caller-owned lifecycle', async () => {
+    expect.assertions(2);
+    const pdfFilePath = outPath('class-multipage.pdf');
+    cleanup(pdfFilePath);
+
+    const single = await loadData();
+    const result = await gen.generate({
+      templateFilePath,
+      pdfFilePath,
+      dataPerPage: [single, single, single],
+    });
+
+    expect(result).toBe(pdfFilePath);
+    expect(isPdfFile(pdfFilePath)).toBe(true);
+  });
+
+  it('accepts a plain helpers object (no JSON file, no eval)', async () => {
+    expect.assertions(1);
+    const pdfFilePath = outPath('class-helpers-object.pdf');
+    cleanup(pdfFilePath);
+
+    const helpers: HandlebarsHelpers = {
+      eq: (a, b) => a === b,
+      and: (...args) => args.slice(0, -1).every(Boolean),
+      or: (...args) => args.slice(0, -1).some(Boolean),
+    };
+
+    await gen.generate({
+      templateFilePath,
+      pdfFilePath,
+      dataPerPage: [await loadData()],
+      helpers,
+    });
+
+    expect(isPdfFile(pdfFilePath)).toBe(true);
+  });
+
+  it('produces a stream that ends and yields a valid PDF', async () => {
+    expect.assertions(1);
+    const pdfFilePath = outPath('class-stream.pdf');
+    cleanup(pdfFilePath);
+
+    const stream = (await gen.generate({
+      templateFilePath,
+      dataPerPage: [await loadData()],
+      useStream: true,
+    })) as Readable;
+
+    await pipelineAsync(stream, createWriteStream(pdfFilePath));
+    expect(isPdfFile(pdfFilePath)).toBe(true);
   });
 });

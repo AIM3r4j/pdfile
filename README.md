@@ -1,6 +1,6 @@
 # PDFile
 
-PDFile is a Node.js library for generating high-quality, dynamic PDFs using Handlebars templates and Puppeteer. It supports multi-page PDFs and offers full customization. Perfect for web developers, it enables easy creation of multi-page PDFs by simply designing HTML templates for output.
+PDFile is a lightweight Node.js library for generating high-quality, dynamic PDFs from Handlebars templates using Puppeteer. It supports multi-page PDFs, true streaming output, and a caller-owned browser lifecycle suitable for servers and long-running processes.
 
 ## Installation
 
@@ -8,65 +8,127 @@ PDFile is a Node.js library for generating high-quality, dynamic PDFs using Hand
 npm i pdfile
 ```
 
-## Usage
+> Requires Node.js 18+. Puppeteer downloads a matching Chromium on install.
 
-### Initialization
+## Quick start
 
-Import the function
+```ts
+import { generatePdf, closeBrowser } from 'pdfile';
 
-```javascript
-import { generatePdf } from 'pdfile';
+await generatePdf({
+  templateFilePath: 'templates/invoice.hbs',
+  dataPerPage: [{ invoiceNumber: 1, total: '$100' }],
+  pdfFilePath: 'out/invoice.pdf',
+});
+
+// Always release Chromium when you're done with the singleton API.
+await closeBrowser();
 ```
 
-Call the function to generate the PDF
+## API
 
-```javascript
-const generatedPdfFilePath = await generatePdf({
-  [templateFilePath],
-  [dataPerPage],
-  [pdfFilePath],
-  [useStream],
-  [helpersFilePath],
-  [puppeteerOptions],
-  [pdfOptions],
+### `generatePdf(options)` — singleton
+
+Uses a module-level Browser. Convenient for scripts and one-shot use. Call `closeBrowser()` when finished so the Node process can exit.
+
+| Option              | Type                            | Required             | Default                                            | Description                                                                              |
+| ------------------- | ------------------------------- | -------------------- | -------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `templateFilePath`  | `string`                        | Yes                  | —                                                  | Path to the Handlebars template file.                                                    |
+| `dataPerPage`       | `Array<object>`                 | Yes                  | —                                                  | One object per page. Each entry renders the template once; outputs are concatenated.     |
+| `pdfFilePath`       | `string`                        | If `useStream` false | —                                                  | Where to write the generated PDF.                                                        |
+| `useStream`         | `boolean`                       | No                   | `false`                                            | Return a Readable PDF stream instead of writing to disk. Mutually exclusive with `pdfFilePath`. |
+| `helpers`           | `Record<string, Function>`      | No                   | —                                                  | Custom Handlebars helpers as a plain object. **Preferred** over `helpersFilePath`.       |
+| `helpersFilePath`   | `string`                        | No                   | —                                                  | _Deprecated._ Path to a JSON file of stringified function bodies; loaded via `new Function`. |
+| `puppeteerOptions`  | [`LaunchOptions`](https://pptr.dev/api/puppeteer.puppeteerlaunchoptions) | No | `{ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'] }` | Puppeteer launch options (only honored on the first call for the singleton). |
+| `pdfOptions`        | [`PDFOptions`](https://pptr.dev/api/puppeteer.pdfoptions) | No | A4, 10mm margins, `printBackground: true`                                  | Merged on top of the defaults.                                                           |
+
+### `PdfGenerator` — caller-owned lifecycle
+
+Each instance owns its own Browser. Use this in servers, tests, or any context where you don't want a global. Multiple instances can run in parallel.
+
+```ts
+import { PdfGenerator } from 'pdfile';
+
+const gen = new PdfGenerator({ headless: 'new' });
+try {
+  await gen.generate({
+    templateFilePath: 'templates/invoice.hbs',
+    dataPerPage: [data],
+    pdfFilePath: 'out/invoice.pdf',
+  });
+} finally {
+  await gen.close();
+}
+```
+
+- `new PdfGenerator(launchOptions?)` — Puppeteer launch options.
+- `warmup()` — pre-launch Chromium (optional).
+- `generate(options)` — same option shape as `generatePdf` (without `puppeteerOptions`).
+- `close()` — shut down the owned Browser.
+
+### Streaming output
+
+When `useStream: true`, `generate()` returns a Puppeteer-native PDF `Readable` (via `page.createPDFStream()`) — the PDF is not buffered into memory.
+
+```ts
+import { createWriteStream } from 'fs';
+import { pipeline } from 'stream/promises';
+
+const stream = await generatePdf({
+  templateFilePath: 'templates/invoice.hbs',
+  dataPerPage: [data],
+  useStream: true,
+});
+
+await pipeline(stream, createWriteStream('out/invoice.pdf'));
+```
+
+### Custom helpers
+
+Prefer the object form — safe, type-checked, and visible to your bundler:
+
+```ts
+await gen.generate({
+  templateFilePath,
+  dataPerPage,
+  pdfFilePath,
+  helpers: {
+    money: (n: number) => `$${n.toFixed(2)}`,
+    upper: (s: string) => s.toUpperCase(),
+  },
 });
 ```
 
+The legacy `helpersFilePath` JSON format (`{ "name": "function(a){ return a; }" }`) is still accepted but **deprecated** — values are passed through `new Function`, so anyone who can write to that file can run code in your process.
 
-| Parameter      | Type           | Description                  |Required                  | Default                  |
-| --------------- | ---------------------- | ----------------------------- | ---------------------- | ----------------------------- |
-| `templateFilePath`  | `string`     | Path to the Handlebars template file. | `Yes`     | `N/A` |
-| `dataPerPage`  | `Array` | Array of objects containing data for each page of the PDF | `Yes`     | `N/A` |
-| `pdfFilePath`   | `string`    | The path where the generated PDF file will be saved. Required, if **useStream** is not passed or set to false. | `No`     | `N/A` |
-| `useStream`    | `boolean`     | Returns a readable stream of the PDF instead of saving it to disk if set to true | `No`     | `false` |
-| `helpersFilePath`   | `string`    | Path to a file containing custom Handlebars helpers. | `No`     | `N/A` |
-| `puppeteerOptions`    | `object`     | Puppeteer launch options (e.g., headless mode, executable path). <[PuppeteerLaunchOptions](https://pptr.dev/api/puppeteer.puppeteerlaunchoptions 'PuppeteerLaunchOptions')> | `No`     |  <pre lang="json"> { "headless": true, "args": ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"] } </pre>    |
-| `pdfOptions`   | `object`    | Options for PDF generation (e.g., format, margins). <[PDFOptions](https://pptr.dev/api/puppeteer.pdfoptions 'PDFOptions')> | `No`     | <pre lang="json"> { "format": "A4", "margin": { "left": "10mm", "top": "10mm", "right": "10mm", "bottom": "10mm" }, "printBackground": true } </pre> |
+### Multi-page templates
 
+Each entry in `dataPerPage` renders the template once and the outputs are concatenated. For paginated output, include a page break at the bottom of your template:
 
-### Working Example
+```hbs
+<section style="page-break-after: always">
+  <!-- one page of content -->
+</section>
+```
 
-To quickly get started, you can use the 'example' folder and check out the working code given in the file 'file.service.ts'. Ensure all dependencies are installed beforehand.
+### Built-in Handlebars helpers
 
-PDF generated in this example:
+| JavaScript      | Standard helper        | `ifCond` block helper           |
+| --------------- | ---------------------- | ------------------------------- |
+| `a === b`       | `{{#if (eq a b)}}`     | `{{#ifCond a '===' b}}`         |
+| `a !== b`       | `{{#if (ne a b)}}`     | `{{#ifCond a '!==' b}}`         |
+| `a > b`         | `{{#if (gt a b)}}`     | `{{#ifCond a '>' b}}`           |
+| `a >= b`        | `{{#if (gte a b)}}`    | `{{#ifCond a '>=' b}}`          |
+| `a < b`         | `{{#if (lt a b)}}`     | `{{#ifCond a '<' b}}`           |
+| `a <= b`        | `{{#if (lte a b)}}`    | `{{#ifCond a '<=' b}}`          |
+| `a && b`        | `{{#if (and a b)}}`    | `{{#ifCond a '&&' b}}`          |
+| `a \|\| b`      | `{{#if (or a b)}}`     | `{{#ifCond a '\|\|' b}}`        |
+
+### Working example
+
+See [`example/file.service.ts`](./example/file.service.ts) for a runnable invoice example. The generated PDF:
 
 ![plot](./images/1.png)
-
-### More details
-
----
-
-| JavaScript      | Handlebars Helper Syntax (Standard)           | Handlebars Helper Syntax (Custom)                  |
-| --------------- | ---------------------- | ----------------------------- |
-| `if (a === b)`  | `{{#if (eq a b)}}`     | `{{#ifCond var1 '===' var2}}` |
-| `if (a !== b)`  | `{{#if (not-eq a b)}}` | `{{#ifCond var1 '!==' var2}}` |
-| `if (a && b)`   | `{{#if (and a b)}}`    | `{{#ifCond var1 '&&' var2}}`  |
-| `if (a > b)`    | `{{#if (gt a b)}}`     | `{{#ifCond var1 '>' var2}}`   |
-| `if (a >= b)`   | `{{#if (gte a b)}}`    | `{{#ifCond var1 '>=' var2}}`  |
-| `if (a < b)`    | `{{#if (lt a b)}}`     | `{{#ifCond var1 '<' var2}}`   |
-| `if (a <= b)`   | `{{#if (lte a b)}}`    | `{{#ifCond var1 '<=' var2}}`  |
-| `if (a && b)`   | `{{#if (and a b)}}`    | `{{#ifCond var1 '&&' var2}}`  |
-| `if (a \|\| b)` | `{{#if (or a b)}}`     | `{{#ifCond var1 \|\| var2}}`  |
 
 ## License
 
